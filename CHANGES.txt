@@ -1,0 +1,26 @@
+
+--- ADDED ---
+
+class-leaguemanager-api-league.php
+templates/matches-custom.php
+templates/matches-homepage.php
+templates/matches-widget.php
+templates/team-custom.php
+
+
+
+
+--- MODIFIED, MERGE NEEDED ---
+
+leaguemanager.php
+	=> leaguemanager_api_init
+
+admin/admin.php
+	=> customImportTeams
+	=> customImportMatches
+
+lib/shortcodes.php
+	=> showUpcomingMatches
+
+sports/handball.php
+	=> customImportMatches

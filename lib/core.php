@@ -386,7 +386,7 @@ class LeagueManager
 		
 		if ( isset($_GET['match_day']) )
 			$match_day = (int)$_GET['match_day'];
-		elseif ( $this->match_day )
+		elseif ( isset($this->match_day) )
 			$match_day = $this->match_day;
 		elseif ( $current && $match = $this->getMatches( "league_id = '".$this->league_id."' AND `season` = '".$this->season."' AND DATEDIFF(NOW(), `date`) <= 0", 1 ) )
 			$match_day = $match[0]->match_day;
@@ -429,12 +429,11 @@ class LeagueManager
 	 * @param string $search
 	 * @return array
 	 */
-	function getLeagues( $search = '' )
+	function getLeagues( $offset=0, $limit=99999999 )
 	{
 		global $wpdb;
 		
-		$leagues = $wpdb->get_results( "SELECT `title`, `id`, `settings`, `seasons` FROM {$wpdb->leaguemanager} ORDER BY id ASC" );
-
+		$leagues = $wpdb->get_results($wpdb->prepare( "SELECT `title`, `id`, `settings`, `seasons` FROM {$wpdb->leaguemanager} ORDER BY id ASC LIMIT %d, %d", $offset, $limit ));
 		$i = 0;
 		foreach ( $leagues AS $league ) {
 			$leagues[$i]->seasons = $league->seasons = maybe_unserialize($league->seasons);
@@ -461,6 +460,7 @@ class LeagueManager
 		global $wpdb;
 		
 		$league = $wpdb->get_results( "SELECT `title`, `id`, `seasons`, `settings` FROM {$wpdb->leaguemanager} WHERE `id` = '".(int)$league_id."' OR `title` = '".$league_id."'" );
+		$league[] = new stdClass();
 		$league = $league[0];
 		$league->seasons = maybe_unserialize($league->seasons);
 		$league->settings = (array)maybe_unserialize($league->settings);
@@ -585,11 +585,14 @@ class LeagueManager
 	 * @param int $league_id
 	 * @return int
 	 */
-	function getNumTeams( $league_id )
+	function getNumTeams( $league_id, $group = '' )
 	{
 		global $wpdb;
-	
-		$num_teams = $wpdb->get_var( "SELECT COUNT(ID) FROM {$wpdb->leaguemanager_teams} WHERE `league_id` = '".$league_id."'" );
+		if($group == ''){
+			$num_teams = $wpdb->get_var( "SELECT COUNT(ID) FROM {$wpdb->leaguemanager_teams} WHERE `league_id` = '".$league_id."'" );
+		} else {
+			$num_teams = $wpdb->get_var( "SELECT COUNT(ID) FROM {$wpdb->leaguemanager_teams} WHERE `league_id` = '".$league_id."'AND `group` = '".$group."'" );
+		}
 		return $num_teams;
 	}
 	
@@ -628,12 +631,12 @@ class LeagueManager
 	 * @param boolean $update
 	 * @return array $teams ordered
 	 */
-	function rankTeams( $league_id, $season = false, $update = true )
+	function rankTeams( $league_id )
 	{
 		global $wpdb;
 		$league = $this->getLeague( $league_id );
                                     
-		if ( !$season )
+		if ( !isset($season) )
 			$season = $this->getSeason($league);
 
 		$season = is_array($season) ? $season['name'] : $season;
@@ -645,7 +648,7 @@ class LeagueManager
 			$search = "`league_id` = '".$league_id."' AND `season` = '".$season."'";
 			if ( !empty($group) ) $search .= " AND `group` = '".$group."'";
 
-			$teams = array();
+			$teams = $teamsTmp = array();
 			foreach ( $this->getTeams( $search ) AS $team ) {
 				$team->diff = ( $team->diff > 0 ) ? '+'.$team->diff : $team->diff;
 				$team->points = array( 'plus' => $team->points_plus, 'minus' => $team->points_minus );
@@ -653,6 +656,7 @@ class LeagueManager
 				$team->winPercent = ($team->done_matches > 0) ? ($team->won_matches/$team->done_matches) * 100 : 0;
 
 				$teams[] = $team;
+				$teamsTmp[] = $team;
 			}
 		
 			if ( !empty($teams) && $league->team_ranking == 'auto' ) {
@@ -666,47 +670,8 @@ class LeagueManager
 			
 					array_multisort($points, SORT_DESC, $done, SORT_ASC, $teams);
 				}
-		
-				/*
-				* Update Team Rank and status
-				*/
-				if ( $update ) {
-					$rank = $incr = 1;
-					$was_tie = false;
-					foreach ( $teams AS $key => $team ) {
-						$old = $this->getTeam( $team->id );
-						$oldRank = $old->rank;
-
-						if ( $oldRank != 0 ) {
-							if ( $rank == $oldRank )
-								$status = '&#8226;';
-							elseif ( $rank < $oldRank )
-								$status = '&#8593;';
-							else
-								$status = '&#8595;';
-						} else {
-							$status = '&#8226;';
-						}
-	
-						$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->leaguemanager_teams} SET `rank` = '%d', `status` = '%s' WHERE `id` = '%d'", $rank, $status, $team->id ) );
-	
-
-						if ( isset($teams[$key+1]) ) {
-							if ( $this->isTie($team, $teams[$key+1]) ) {
-								$incr++;
-								$was_tie = true;
-							} else {
-								$rank += $incr;
-
-								if ( $was_tie ) {
-									$incr = 1;
-									$was_tie = false;
-								}
-							}
-						}
-					}
-				}
 			}
+            updateRanking( $league_id, $season, $group, $teams, $teamsTmp );
 		}
 
 		return true;
@@ -722,6 +687,7 @@ class LeagueManager
 	 */
 	function isTie( $team, $team2 )
 	{
+//    echo "Check for tie here1 <br>";
 		if ( $team->points['plus'] == $team2->points['plus'] && $team->diff == $team2->diff && $team->points2['plus'] == $team2->points2['plus'] )
 			return true;
 
@@ -820,6 +786,37 @@ class LeagueManager
 			return $cards[$type];
 		else
 			return $cards;
+	}
+	
+	function lm_pagination($paged, $pages = '', $range = 4) {
+		$showitems = ($range * 2)+1;
+	
+		if(empty($paged)) $paged = 1;
+		if($pages == '') {
+			global $wp_query;
+			$pages = $wp_query->max_num_pages;
+			if(!$pages) {
+				$pages = 1;
+			}
+		}
+
+		$div_output = '';
+		if (1 != $pages) {
+			$div_output .= "<ul class='pagination'>";
+			if($paged > 2 && $paged > $range+1 && $showitems < $pages) $div_output .= "<li><a href='".get_pagenum_link(1)."' class='first_page'>&laquo; First</a></li>";
+			if($paged > 1) $div_output .= "<li><a href='".get_pagenum_link($paged - 1)."' class='prev_page'>&lsaquo; Previous</a></li>";
+				
+			for ($i=1; $i <= $pages; $i++) {
+				if (1 != $pages &&( !($i >= $paged+$range+1 || $i <= $paged-$range-1) || $pages <= $showitems )) {
+					$div_output .= ($paged == $i)? "<li class='active'><a href=''>".$i."</a></li>":"<li><a href='".get_pagenum_link($i)."' class='inactive'>".$i."</a></li>";
+				}
+			}
+	
+			if ($paged < $pages) $div_output .= "<li><a href='".get_pagenum_link($paged + 1)."' class='next_page'>Next &rsaquo;</a></li>";
+			if ($paged < $pages-1 && $paged+$range-1 < $pages && $showitems < $pages) $div_output .= "<li><a href='".get_pagenum_link($pages)."' class='last_page'>Last &raquo;</a></li>";
+			$div_output .= "</ul>\n";
+		}
+		return $div_output;
 	}
 }
 ?>
