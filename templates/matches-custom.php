@@ -40,9 +40,7 @@ The following variables are usable:
 <?php endforeach; ?>
 </table>
 </div>
-<button type="button" class="btn btn-default btn-block collapsed toggle-matches" data-toggle="collapse" data-target="#team-matches">
-  <span class="show-hide-matches"></span> Spiele anzeigen&nbsp;&nbsp;&nbsp;<span class="glyphicon glyphicon-chevron-down"></span>
-</button>
+<button type="button" class="btn btn-default btn-block collapsed toggle-matches" data-toggle="collapse" data-target="#team-matches"><span class="show-hide-matches"></span> Spiele anzeigen&nbsp;&nbsp;&nbsp;<span class="glyphicon glyphicon-chevron-down"></span></button>
 <?php else : ?>
 <p><?php echo __( 'No Matches found', 'leaguemanager' ) ?></p>
 
